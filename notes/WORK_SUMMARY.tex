@@ -1,0 +1,332 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+
+\title{Work summary:\\multiscale hydrodynamic entropy in neural networks}
+\author{}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note summarizes the notebooks, report, and talks in this folder.
+The project asks whether trained neural networks organize energy across scales in the manner of turbulent fluids.
+The diagnostic is M.~K.~Verma's hydrodynamic entropy: a layer or mesh level is treated as a mode, its energy is turned into a probability, and the spread of that probability is measured.
+Numbers below are taken from saved notebook outputs.
+\end{abstract}
+
+\section{Shared method}
+
+For a set of scales labeled by an index \(k\):
+\begin{enumerate}
+  \item Measure an energy \(E(k)\) at that scale (weight energy, activation energy, or a geometric projection).
+  \item Normalize
+  \[
+    p_k = \frac{E(k)}{\sum_k E(k)}.
+  \]
+  \item Compute the hydrodynamic entropy and compare it with its maximum,
+  \[
+    S_H = -\sum_k p_k \log_2 p_k,
+    \qquad
+    S_{\max} = \log_2 N.
+  \]
+  \item Fit a power law \(E(k) \propto k^{\alpha}\) and compare \(\alpha\) with the Kolmogorov value \(-5/3 \approx -1.667\) and, for the atmosphere, the Nastrom--Gage slopes (\(-3\) at synoptic scales and \(-5/3\) at mesoscales).
+\end{enumerate}
+
+The meaning of ``scale'' depends on the model.
+\begin{itemize}
+  \item \textbf{CNNs.} Receptive-field size \(R\) in pixels, with wavenumber \(k = 1/R\).
+  \item \textbf{GraphCast.} Icosahedral mesh level \(M0\)--\(M5\) or \(M6\). Edge length sets the physical scale, from about \(10{,}000\,\mathrm{km}\) down to \(156\,\mathrm{km}\).
+  \item \textbf{FourCastNet.} Fourier wavenumber inside the Adaptive Fourier Neural Operator (AFNO).
+\end{itemize}
+
+Two energy definitions are used, and they answer different questions.
+\begin{itemize}
+  \item \textbf{Mean energy per unit} (per edge, or \(\mathrm{mean}(W^2)\)) removes the bias that comes from having more edges or more weights at fine scales.
+  \item \textbf{Total energy} (\(\sum W^2\) or \(\sum \|h\|^2\)) grows with the number of units. It can look like a steep positive cascade even when the energy per unit is flat.
+\end{itemize}
+
+The record of the work is the notebooks, \texttt{1.~Report.docx}, \texttt{2.~Presentation.pptx}, and the two FourCastNet PDFs.
+The FourCastNet write-up is dated 25~April 2026.
+This folder has no git history.
+
+\section{Vision networks as a control}
+\label{sec:vision}
+
+These notebooks test the entropy method on image models before it is applied to weather models.
+
+\subsection{Receptive fields and mean weight energy}
+
+\texttt{Main codes/3. allcnn\_mean.ipynb} and the tables in \texttt{1.~Report.docx} compute receptive fields layer by layer, then the mean squared weight \(\mathrm{mean}(W^2)\) of ImageNet-pretrained convolutions.
+
+\begin{table}[ht]
+  \centering
+  \caption{Mean convolutional weight energy. The fit is \(\mathrm{mean}(W^2) \sim (1/R)^{\beta}\).}
+  \label{tab:cnn-mean}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Model & Conv.\ layers & Final RF & \(S_H\) & \(S_H/S_{\max}\) & \(\beta\) \\
+    \midrule
+    AlexNet & 5  & 163~px & 1.323 & 0.570 & 1.112 \\
+    VGG-16  & 13 & 196~px & 1.067 & 0.288 & 1.052 \\
+    VGG-19  & 16 & 252~px & 1.103 & 0.276 & 1.010 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Energy is concentrated in the first convolution.
+Deeper VGG nets are less uniform (\(S_H/S_{\max}\) near \(0.28\)) than AlexNet (\(0.57\)).
+The reported exponents are positive because the fit is \(E \sim k^{+\beta}\) with \(k = 1/R\): mean weight energy falls as the receptive field grows.
+Later GraphCast fits report \(\alpha\) in \(E \propto k^{\alpha}\) and compare it directly with \(-5/3\).
+
+\subsection{Total weight energy on pretrained VGG}
+
+\texttt{Other codes/vgg16pretrained.ipynb} and \texttt{Other codes/vgg19\_weight\_analysis.ipynb} use total \(\sum W^2\).
+That quantity grows toward deeper layers, so the fitted exponent is negative and shallow.
+
+\begin{table}[ht]
+  \centering
+  \caption{Total weight energy \(\sum W^2\) on pretrained VGG networks.}
+  \label{tab:vgg-total}
+  \begin{tabular}{lrrr}
+    \toprule
+    Model & \(\alpha\) & \(R^2\) & \(S_H/S_{\max}\) \\
+    \midrule
+    VGG-16 & \(-0.507\) & 0.956 & 0.944 \\
+    VGG-19 & \(-0.415\) & 0.947 & 0.962 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The bootstrap 95\% interval on VGG-19's \(\alpha\) is \([-0.471,-0.348]\) (10{,}000 resamples, 16 layers).
+Local slopes vary strongly (coefficient of variation about \(2\)), so a single power law is only a rough description.
+Normalized entropy near \(0.96\) means the total weight energy is spread almost evenly across layers.
+Both slopes are much shallower than the Kolmogorov value \(-1.67\).
+
+\subsection{Training from scratch}
+
+\texttt{Other codes/vgg\_sample\_not\_pretrained.ipynb} trains a VGG-style network and snapshots \(\sum w^2\).
+The power-law exponent moves from \(\alpha = -0.670\) at initialization (\(R^2 = 0.943\)) to about \(-0.48\) by epoch~30, still far from \(-5/3\).
+Per-layer Shannon entropy of the weights drops over the first few epochs and then levels off.
+
+\texttt{Other codes/mlp\_training\_dynamics.ipynb} trains a five-hidden-layer MLP (512 units) on CIFAR-10 and tracks both activations and weights.
+\begin{itemize}
+  \item In the first run, the activation exponent moves from about \(-3.02\) at initialization to about \(-0.97\) after 30 epochs. The notebook reads this as SGD flattening a steep random spectrum.
+  \item A second run with bootstrap intervals (epoch~0 to~50) finds activation \(\alpha\) moving from \(-1.67\) \([-1.96,-1.24]\) to \(-0.93\) \([-1.38,-0.42]\), while the weight exponent steepens from \(-0.60\) to \(-1.22\). Weight entropy falls from \(S_H/S_{\max} = 0.91\) to about \(0.67\).
+  \item With only five layers, these fits are descriptive. Clauset-style tests do not apply.
+\end{itemize}
+
+\subsection{ResNet-50}
+
+\texttt{Other codes/resnet50\_activation\_analysis.ipynb} separates activations from weights on a pretrained ResNet-50 (five stages).
+\begin{itemize}
+  \item \textbf{Activations.} \(\alpha = -0.061\), \(R^2 = 0.004\). There is no power-law trend. The notebook attributes this to residual connections, which keep \(\|h_{l+1}\|^2\) from collapsing.
+  \item \textbf{Weights.} \(\alpha = -0.765\), \(R^2 = 0.957\), \(S_H = 1.715\) bits, \(S_H/S_{\max} = 0.739\). Weight energy still declines toward finer receptive fields, less steeply than Kolmogorov.
+\end{itemize}
+The comparison drawn in the notebook is that VGG, which has no skip connections, dissipates activation energy, while ResNet holds it near flat.
+
+\section{GraphCast}
+\label{sec:graphcast}
+
+GraphCast (DeepMind) is a graph neural network on a hierarchy of icosahedral meshes.
+Three public checkpoints are analyzed.
+Latent size is 512 and each checkpoint uses 16 message-passing steps.
+Mesh lengths run from about \(10{,}008\,\mathrm{km}\) (\(M0\), 60 edges) to \(313\,\mathrm{km}\) (\(M5\)) or \(156\,\mathrm{km}\) (\(M6\), 245{,}760 edges).
+
+\begin{table}[ht]
+  \centering
+  \caption{GraphCast checkpoints used in the notebooks.}
+  \label{tab:gc-ckpts}
+  \begin{tabular}{llrlrl}
+    \toprule
+    Checkpoint & Resolution & Levels & Mesh & Edges & Training data \\
+    \midrule
+    Small       & \(1.0^\circ\)  & 13 & \(M0\)--\(M5\) & 81{,}900  & ERA5 1979--2015 \\
+    Operational & \(0.25^\circ\) & 13 & \(M0\)--\(M6\) & 327{,}660 & ERA5-HRES 1979--2021 \\
+    Full        & \(0.25^\circ\) & 37 & \(M0\)--\(M6\) & 327{,}660 & ERA5 1979--2017 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Geometric encoder spectrum}
+
+The Small, Operational, and Full notebooks in \texttt{Main codes/} do not run a forecast.
+They take the first linear map of the mesh-edge encoder,
+\begin{center}
+\texttt{mesh\_gnn/\textasciitilde\_networks\_builder/encoder\_edges\_mesh\_mlp/\textasciitilde/linear\_0},
+\end{center}
+a single shared matrix \(W\) of shape \((4,512)\).
+Each edge has a 4-vector \(x = (\Delta\mathbf{x}, \|\Delta\mathbf{x}\|)\).
+The energy at a mesh level is the mean over edges of \(\|Wx\|^2\).
+
+\begin{table}[ht]
+  \centering
+  \caption{Geometric encoder spectrum, \(E(k) = \mathrm{mean}\,\|Wx\|^2\).}
+  \label{tab:gc-geom}
+  \begin{tabular}{lrrrrrl}
+    \toprule
+    Model & \(S_H\) (bits) & \(S_{\max}\) & \(S_H/S_{\max}\) & \(\alpha\) & \(R^2\) & Dominant level \\
+    \midrule
+    Small       & 1.205 & 2.585 & 46.6\% & \(-1.866\) & 0.9995 & \(M0\), 70.5\% \\
+    Operational & 1.206 & 2.807 & 42.9\% & \(-1.846\) & 0.9986 & \(M0\), 70.5\% \\
+    Full        & 1.206 & 2.807 & 43.0\% & \(-1.843\) & 0.9986 & \(M0\), 70.5\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The three checkpoints give almost the same spectrum.
+About 70\% of this geometric energy sits on the coarsest mesh.
+The slope is close to, and slightly steeper than, Kolmogorov \(-5/3\).
+Because \(W\) is shared and \(x\) is purely geometric, this slope is a property of the encoder acting on edge geometry.
+
+\texttt{1.~Report.docx} contains the CNN receptive-field tables and then only the headings ``Graphcast / GC\_Full / GC\_Small / GC\_Operational.''
+The quantitative GraphCast results are in the notebooks.
+
+\subsection{Activation spectrum on a forward pass}
+
+\texttt{Other codes/graphcast-analysis.ipynb} (104 cells) loads GraphCast Small, runs a forward pass on ERA5 sample data, and hooks the processor so that edge features can be recorded after message passing.
+This spectrum is much shallower than the geometric \(W\cdot x\) result.
+
+Energy per edge is split as \(E = S + V\):
+\begin{itemize}
+  \item \(S\) is the energy of the mean activation (the systematic signal);
+  \item \(V\) is the variance around that mean, treated as informational content.
+\end{itemize}
+
+\begin{table}[ht]
+  \centering
+  \caption{Level-aggregated activation spectrum on GraphCast Small (six mesh levels).}
+  \label{tab:gc-act}
+  \begin{tabular}{lrrr}
+    \toprule
+    Component & \(\alpha\) (OLS) & Bootstrap 95\% CI & \(R^2\) \\
+    \midrule
+    Total \(E\)   & \(-0.278\) & \([-0.564,-0.033]\) & 0.70 \\
+    Signal \(S\)  & \(-0.597\) & \([-1.152,-0.115]\) & 0.70 \\
+    Variance \(V\) & \(+0.155\) & \([+0.038,+0.261]\) & 0.79 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Finer edge-length binning moves the total-energy exponent only slightly, to about \(-0.34\) (16 bins) or \(-0.32\) (11 bins).
+An earlier notebook (\texttt{finalgc\_mar.ipynb}, cited but absent from this folder) reported \(\alpha \approx +1.72\) for the \emph{sum} of \(\|h\|^2\).
+That positive slope is an edge-count effect: \(M5\) has \(1{,}024\) times as many edges as \(M0\).
+The mean per edge is the quantity used here.
+
+Further checks in the same notebook:
+\begin{itemize}
+  \item \textbf{The slope is learned.} Shuffling the mesh gives \(\alpha \approx 0.02\). Random features give \(\alpha \approx 0\). The negative slope is a property of the trained model on the true mesh.
+  \item \textbf{Broken power law.} A spectral break near \(544\,\mathrm{km}\) is preferred over a single power law (\(\Delta\mathrm{AIC}\) large). The large-scale slope is about \(-0.04\) and the small-scale slope about \(-0.85\). Local slopes of \(E\) have coefficient of variation about \(1.2\).
+  \item \textbf{Output fields.} Two-dimensional spectra of the forecast itself are steep: \(2\,\mathrm{m}\) temperature \(\alpha = -3.51\) (\(R^2 = 0.95\)), mean sea-level pressure \(\alpha = -4.17\) (\(R^2 = 0.94\)), and \(10\,\mathrm{m}\) zonal wind \(\alpha = -3.11\) (\(R^2 = 0.98\)). These lie nearer a synoptic \(-3\) spectrum than the internal edge features do.
+  \item \textbf{Distribution versus spectrum.} A Clauset--Shalizi--Newman test on the histogram of edge energies prefers lognormal, exponential, and stretched-exponential alternatives over a power-law distribution. That test asks whether the \emph{values} are power-law distributed. The regression above asks whether \emph{mean energy versus scale} follows a power law.
+  \item \textbf{Per message-passing step.} Stacking 6 levels and 34 recorded steps gives 204 points. The pooled exponent is \(\alpha = -0.061\) with 95\% CI \([-0.110,-0.009]\). The interval excludes both \(0\) and \(-1.67\). The fit itself is weak (\(R^2 = 0.025\)). The exponent drifts across GNN steps, from about \(-0.105\) to \(0\).
+  \item \textbf{Cascade direction.} Net energy flux is forward, toward small scales. Variance flux is inverse. Normalized spectral entropy of the variance is about \(0.99\), which the notebook reads as information kept across scales while the mean signal collapses.
+\end{itemize}
+
+\section{FourCastNet}
+\label{sec:fcn}
+
+The FourCastNet notebook and the two accompanying PDFs set up the same entropy analysis for NVIDIA's FourCastNet (AFNO, 12 blocks, \(0.25^\circ\) grid, 20 input channels, hidden width 1024).
+
+The pipeline is:
+\begin{enumerate}
+  \item Clone the official FourCastNet repository and load \texttt{AFNONet}.
+  \item Register forward hooks on all 12 spectral blocks under \texttt{torch.no\_grad()}.
+  \item Map each complex activation to a radial wavenumber \(k = \sqrt{k_x^2 + k_y^2}\).
+  \item Collapse \(|a(k)|^2\) into a one-dimensional shell energy with a vectorized \texttt{scatter\_add\_} (or a CPU equivalent in the saved run).
+  \item Compute \(S_H\) per block and a spectral slope.
+\end{enumerate}
+
+The saved notebook run used mock ERA5 (synthetic \(1/k^2\) or random fields) and does not yet show a full pretrained-weight trajectory.
+The measured shell slope was \(\beta \approx 0.976\).
+For spatially white noise, energy per radial ring grows with the ring circumference, so \(E(k) \propto k^{+1}\).
+Entropy across the 12 blocks moved only in the fourth decimal place (variance under \(0.001\) bits).
+That run is a pipeline check: the binning recovers the geometric \(k^{+1}\) spectrum, and the network does not impose large-scale structure on pure noise.
+
+The report states the hypotheses still to be tested on real ERA5 and on the pretrained backbone weights.
+\begin{itemize}
+  \item \textbf{Inside a block (latent whitening).} Physical enstrophy decays near \(k^{-3}\). The AFNO may boost high frequencies so that hidden channels retain variance, producing a much shallower slope.
+  \item \textbf{Across blocks.} Soft-thresholding is expected to act as a viscosity: \(S_H\) should fall from block~0 to block~11 as the forecast becomes more organized.
+\end{itemize}
+Static AFNO weights are the wrong object for this measurement.
+They are shared across all wavenumbers, so \(|W|^2\) is flat.
+The quantity of interest is the activation \(a(k)\).
+
+\section{What the results say together}
+
+\begin{enumerate}
+  \item The same entropy definition behaves differently in vision nets and in the weather GNN.
+  Mean convolutional weight energy is concentrated in early layers, especially in VGG.
+  Residual networks keep activation energy nearly flat across stages.
+  An MLP's activation spectrum flattens during SGD, from a steep random initialization toward a slope near \(-1\).
+
+  \item GraphCast's geometric encoder is Kolmogorov-like (\(\alpha \approx -1.85\), \(R^2 > 0.998\)) and is almost identical for Small, Operational, and Full.
+  Most of that energy sits on the coarsest mesh.
+
+  \item GraphCast's learned edge activations decline only as about \(k^{-0.28}\).
+  The decline is mostly in the mean signal; the variance is flat or slightly rising.
+  Shuffled and random baselines lose the slope, so the slope is learned.
+  It is neither classical turbulence nor a clean single power law.
+
+  \item GraphCast's output fields differ from its internal edges.
+  Forecast spectra of temperature, pressure, and wind are steep, with \(\alpha\) about \(-3\) to \(-4\).
+
+  \item FourCastNet's measurement pipeline is validated on noise.
+  The white-noise control returns the expected \(k^{+1}\) shell spectrum and a flat entropy trajectory.
+  The comparison with a \(k^{-3}\) enstrophy cascade on real ERA5 is the remaining step.
+\end{enumerate}
+
+\appendix
+\section{File map}
+
+\begin{table}[ht]
+  \centering
+  \caption{Files in this folder and the analysis each one carries.}
+  \label{tab:files}
+  \small
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    Path & Role \\
+    \midrule
+    \texttt{Main codes/3. allcnn\_mean.ipynb}
+      & AlexNet, VGG-16, and VGG-19 receptive fields and \(\mathrm{mean}(W^2)\) entropy. \\
+    \texttt{Main codes/4. Graphcast\_full.ipynb}
+      & GraphCast Full geometric \(W\cdot x\) spectrum. \\
+    \texttt{Main codes/5. Graphcast-small.ipynb}
+      & GraphCast Small geometric \(W\cdot x\) spectrum. \\
+    \texttt{Main codes/6. Graphcast-operational.ipynb}
+      & GraphCast Operational geometric \(W\cdot x\) spectrum. \\
+    \texttt{Main codes/7. Fourcastnet\_manual.ipynb}
+      & FourCastNet hooks, shell energy, and the white-noise control. \\
+    \texttt{Other codes/graphcast-analysis.ipynb}
+      & GraphCast Small forward-pass spectrum, statistics, and baselines. \\
+    \texttt{Other codes/mlp\_training\_dynamics.ipynb}
+      & MLP spectrum during training. \\
+    \texttt{Other codes/resnet50\_activation\_analysis.ipynb}
+      & ResNet-50 activation energy versus weight energy. \\
+    \texttt{Other codes/vgg16pretrained.ipynb}
+      & Pretrained VGG-16 total weight energy. \\
+    \texttt{Other codes/vgg19\_weight\_analysis.ipynb}
+      & Pretrained VGG-19 weight energy and bootstrap tests. \\
+    \texttt{Other codes/vgg\_sample\_not\_pretrained.ipynb}
+      & VGG trained from scratch; \(\alpha\) versus epoch. \\
+    \texttt{1. Report.docx}
+      & Receptive-field tables for AlexNet, VGG-16, and VGG-19. GraphCast section started. \\
+    \texttt{2. Presentation.pptx}
+      & Slide deck. \\
+    \texttt{FourCastNet Spectral Analysis Report.pdf}
+      & FourCastNet method, hypotheses, and control-test status. \\
+    \texttt{Fourcastnet\_ppt.pdf}
+      & Matching nine-slide talk, 25~April 2026. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\end{document}

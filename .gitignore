@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.tar.gz
+
+# Downloaded CIFAR archives and extracted batches. Too large to host,
+# and the training code downloads them again.
+kaggle/session-output/data/
+kaggle/run-output/data/

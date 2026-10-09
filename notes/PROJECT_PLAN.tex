@@ -1,0 +1,260 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{microtype}
+
+\setlist[enumerate]{itemsep=0.35em,topsep=0.4em}
+\setlist[itemize]{itemsep=0.25em,topsep=0.35em}
+
+\title{Project plan:\\hydrodynamic entropy of a learned\\two-dimensional flow}
+\author{}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The quantity to compute is the hydrodynamic entropy of Verma and Chatterjee
+(Phys.\ Rev.\ Fluids \textbf{7}, 114608, 2022) and of Verma, Stepanov, and Delache
+(Phys.\ Rev.\ E \textbf{110}, 055106, 2024): the Shannon entropy of the Fourier
+modal energies of a velocity field.
+This plan trains a small network to advance a two-dimensional flow by one time
+step, then asks whether the learned flow reproduces the entropy trajectories
+those papers measured in the solver.
+The entropy is never computed from weights, layers, or receptive fields.
+\end{abstract}
+
+\section{What the papers actually compute}
+
+Both papers use the same definition.
+For a velocity field with Fourier coefficient \(\mathbf{u}(\mathbf{k})\), the modal energy and its probability are
+\begin{equation}
+  E(\mathbf{k}) = \tfrac12 |\mathbf{u}(\mathbf{k})|^2,
+  \qquad
+  p_{\mathbf{k}} = \frac{E(\mathbf{k})}{\sum_{\mathbf{k}} E(\mathbf{k})},
+  \qquad
+  S_H = -\sum_{\mathbf{k}} p_{\mathbf{k}}\log_2 p_{\mathbf{k}}.
+  \label{eq:SH}
+\end{equation}
+The sum runs over the active, dealiased modes.
+If the energy is spread equally over \(M\) modes, \(S_H = \log_2 M\).
+If one mode holds all the energy, \(S_H = 0\).
+The formula uses amplitudes only. Phases do not enter.
+
+For an isotropic spectrum the 2024 paper replaces the modal sum by a shell sum,
+\(E(k) = \sum_{k-1 < |\mathbf{k}'| \le k} E(\mathbf{k}')\), with the same formula for \(S_H\).
+The 2022 paper keeps the modal sum, because the structures it studies (a shear layer, a vortex dipole) are not isotropic.
+This project uses the modal sum as the primary number, and the shell sum as a second number when the flow is forced and roughly isotropic.
+
+\subsection{2022, two-dimensional Euler}
+
+The system is incompressible Euler flow: no viscosity and no force.
+Thermodynamic entropy is constant, because there is no heat production.
+Hydrodynamic entropy is not.
+On a \(512^2\) pseudospectral grid, three initial conditions reach three different large-scale states, and in each case \(S_H(t)\) falls and then levels off:
+
+\begin{center}
+\begin{tabular}{llrr}
+\toprule
+Run & Asymptotic structure & \(S_H\) & \(\log_2 M\) \\
+\midrule
+A & vortex--antivortex pair & 4.9 & \(\approx 16.5\) \\
+B & unidirectional shear & 1.2 & \(\approx 16.5\) \\
+C & four vortex pairs & 3.1 & \(\approx 16.5\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Run B is the cleanest illustration. The modes \(\mathbf{u}(0,\pm 1)\) hold about 99\% of the energy, so \(S_H \approx 1\).
+The fall in \(S_H\) is the inverse cascade: energy moves toward a few small-\(k\) modes.
+Those modes stay out of equilibrium. Their transfer \(T(k)\) and flux
+\(\Pi(k) = -\int_0^k T(k')\,dk'\) remain nonzero, and \(\Pi(k)\) is negative at small \(k\).
+At large \(k\) the spectrum settles near Kraichnan's equilibrium form
+\(E(k) = k/(\beta + \gamma k^2)\), which is enstrophy equipartition, \(E(k)\sim k^{-1}\).
+Three-dimensional Euler does the opposite: \(S_H\) rises toward \(\log_2 M\) and the flux vanishes.
+The initial condition chooses the asymptotic value. A \(\delta\)-correlated start thermalizes and \(S_H\) stays at the maximum.
+
+\subsection{2024, what that number means}
+
+The follow-up paper uses the same \(S_H\) on forced Navier--Stokes turbulence, on the Ising model, and on the time-dependent Ginzburg--Landau equation, and states the properties that matter here.
+
+\begin{itemize}
+  \item \(S_H\) measures how the macroscopic energy is spread across scales. It is not thermodynamic entropy, and the two are not added.
+  \item It is nonextensive. The ceiling is \(\log_2 M\), and a turbulent spectrum does not even reach that ceiling.
+  \item For a Kolmogorov spectrum \(E(k)\propto k^{-5/3}\), logarithmically binned shells give \(S_H\) between about 3 and 4, almost independent of grid size. Their \(512^3\) forced run saturates near \(3.8\).
+  \item A signal whose \(S_H\) is far from that range is not that kind of turbulence. Equipartition sits at \(\log_2 M\). A field that has collapsed onto one mode sits at \(0\), as in the Ginzburg--Landau run that relaxes to \(\phi = 1\).
+  \item Because phases are discarded, \(S_H\) does not determine the energy transfer. The flux has to be computed separately.
+\end{itemize}
+
+\section{Where the network enters}
+
+The papers already produce \(S_H(t)\) by integrating the fluid equations.
+The project inserts a learned map in place of one time step of that integrator,
+\[
+  \omega_{t+\Delta t} = \mathcal{N}_\theta(\omega_t),
+\]
+and asks whether the entropy trajectory of the learned dynamical system is the trajectory in the papers.
+
+The field that enters Eq.~\eqref{eq:SH} is the velocity (or the vorticity, converted to velocity through the stream function) of the flow, at a snapshot produced either by the solver or by rolling \(\mathcal{N}_\theta\) forward.
+A matched one-step pixel error is not the result.
+The result is whether \(S_H(t)\) under the learned step follows the paper: down to a small, initial-condition-dependent plateau for 2D Euler, or flat and of order a few bits for forced two-dimensional turbulence.
+
+This is the same mechanism the papers identify.
+In 2D Euler, order appears because nonlinear transfer piles energy into a few large-scale modes, and \(S_H\) falls.
+A network that blurs the field also lowers \(S_H\), but it does so by destroying small scales, which is the Ginzburg--Landau collapse toward \(S_H = 0\), not the Euler condensate.
+A network that thermalizes raises \(S_H\) toward \(\log_2 M\), which is the three-dimensional Euler outcome and the wrong attractor in 2D.
+The flux sign separates these three outcomes. Only the Euler condensate has negative \(\Pi(k)\) at small \(k\) while \(S_H\) falls to a value of order 1, far below \(\log_2 M\) and above 0.
+
+\section{Question and predictions}
+
+\textbf{Question.}
+Does a one-step neural emulator of two-dimensional flow reproduce the hydrodynamic-entropy trajectories of the 2022 and 2024 papers, including their dependence on the initial condition and on whether the flow is inviscid or forced?
+
+Predictions, each tied to a result in the papers:
+
+\begin{enumerate}
+  \item \textbf{Euler, emergence of order.}
+  On the three families of initial data from the 2022 paper, solver and emulator both have a falling \(S_H(t)\) that saturates far below \(\log_2 M\).
+  The shear-like initial condition saturates lowest, as Run B does.
+
+  \item \textbf{The plateau remembers the initial condition.}
+  Training on one family and rolling out another does not produce that family's plateau.
+  The 2022 states are not a unique equilibrium.
+
+  \item \textbf{Forced turbulence, a steady entropy.}
+  With steady forcing and viscosity, \(S_H(t)\) of a long rollout fluctuates about a constant of a few bits and does not grow when the grid is refined from \(64^2\) to \(128^2\).
+  That is the nonextensivity result of the 2024 paper, in two dimensions.
+
+  \item \textbf{Pixel loss alone leaves the trajectory.}
+  One-step mean-squared error can look small while the rollout entropy goes to \(0\) (over-smoothed) or climbs toward \(\log_2 M\) (scrambled phases, equipartition).
+  Matching the shell energies, and matching \(\Pi(k)\) at low \(k\), is what holds the rollout on the solver's \(S_H(t)\).
+
+  \item \textbf{Entropy match is not a flux match.}
+  The 2024 paper notes that \(S_H\) ignores phase.
+  A rollout can sit on the right \(S_H\) while \(\Pi(k)\) at small \(k\) has the wrong sign.
+  Both are reported. The claim of a learned inverse cascade requires \(\Pi(k)<0\) at small \(k\).
+\end{enumerate}
+
+\section{Solver}
+
+Two datasets, both pseudospectral, periodic box \((2\pi)^2\), 2/3 dealiasing, vorticity form
+\[
+  \partial_t\omega + \mathbf{u}\cdot\nabla\omega = \nu\nabla^2\omega + f - \alpha\omega,
+  \qquad
+  \nabla^2\psi = -\omega,
+  \qquad
+  \mathbf{u} = \nabla^\perp\psi.
+\]
+
+\begin{center}
+\small
+\begin{tabular}{lll}
+\toprule
+& Euler track & Forced track \\
+\midrule
+Equations & \(\nu = f = \alpha = 0\) & \(\nu > 0\), force at \(k_f = 4\) \\
+Grids & \(64^2\), then \(128^2\) & same \\
+Time scheme & symplectic, or RK4 & RK4 with integrating factor \\
+Initial data & analogues of Runs A, B, C & a spun-up turbulent state \\
+Saved field & \(\omega(\mathbf{x},t)\) & \(\omega(\mathbf{x},t)\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The 2022 runs used \(512^2\).
+The entropy they measured is carried by a handful of low modes, so \(64^2\) and \(128^2\) are enough to see \(S_H\) fall, provided the dealiasing and the conservation of energy are checked the way the paper checks them: relative drift of \(E\) and of enstrophy below about \(10^{-4}\) on an Euler run.
+If the coarse Euler run fails to condense, the grid goes to \(128^2\) before any network is trained.
+Forcing uses a single shell so the injection scale is obvious in \(\Pi(k)\).
+
+Each saved frame stores \(\omega\).
+Velocity, \(E(\mathbf{k})\), \(S_H\), \(T(k)\), and \(\Pi(k)\) are computed from it in the analysis code, with the same definitions as the papers.
+
+\section{Network}
+
+The model maps one vorticity frame to the next frame at a fixed \(\Delta t\) of a few solver steps, so the target is not contaminated by a single-step truncation error.
+
+Architecture, in order of preference for the first working version:
+\begin{enumerate}
+  \item A small Fourier neural operator, or a convolutional net of a few layers, with a hard divergence-free projection: the network outputs \(\omega\), and \(\mathbf{u}\) is recovered from \(\psi\).
+  \item Parameter count small enough to train on one GPU from the \(64^2\) data in a few hours.
+\end{enumerate}
+
+The loss used for the main claim is the pixel loss plus a spectral term,
+\[
+  \mathcal{L}
+  = \|\omega_{\mathrm{pred}}-\omega_{\mathrm{true}}\|_2^2
+  + \lambda_E\sum_k\left(\log E_{\mathrm{pred}}(k)-\log E_{\mathrm{true}}(k)\right)^2.
+\]
+A second training adds the flux term from the 2022 diagnostic,
+\[
+  \mathcal{L}_\Pi = \sum_{k\le k_f}\big(\Pi_{\mathrm{pred}}(k)-\Pi_{\mathrm{true}}(k)\big)^2,
+\]
+and the comparison of the two trainings is Prediction 4.
+\(\Pi\) is computed from the predicted velocity by the same transfer routine used on the solver output.
+
+No entropy of the weights is in the loss or in the tables.
+
+\section{Diagnostics, matched to the papers}
+
+On every held-out rollout, solver and emulator side by side:
+
+\begin{enumerate}
+  \item \(S_H(t)\) from Eq.~\eqref{eq:SH}, modal sum, together with \(S_H/S_{\max}\) and \(S_{\max}=\log_2 M\).
+  \item Shell \(S_H(t)\) from the 2024 shell formula, reported for the forced runs.
+  \item The fraction of energy in the first few modes, so a Run-B-like state is visible as ``two modes, \(S_H\approx 1\)'' rather than only as a curve.
+  \item \(E(k)\) and \(\Pi(k)\) averaged over the late window, as in Fig.~4 of the 2022 paper.
+  \item Relative drift of total energy and total enstrophy on Euler rollouts.
+  \item One vorticity snapshot of the late state, next to the solver snapshot. \(S_H\) does not show the phase.
+\end{enumerate}
+
+Reference lines drawn on the entropy plot: \(0\), the late solver value, and \(\log_2 M\).
+A learned Euler run that falls from \(\log_2 M\) toward the solver plateau is the 2022 result.
+A learned forced run that stays flat while \(\log_2 M\) moves up under grid refinement is the 2024 result.
+
+\section{Work plan}
+
+\paragraph{Stage 0. Solver and the paper curves.}
+Implement the \(64^2\) Euler solver. Reproduce the qualitative 2022 trajectories: \(S_H(t)\) falls for the three initial conditions, the shear-like case ends lowest, and \(\Pi(k)<0\) at small \(k\) in the late window.
+Then the forced case: \(S_H(t)\) levels off.
+Write down the measured plateaus and \(S_{\max}\).
+This stage is finished when those curves exist and energy is conserved on the Euler runs.
+No network yet.
+
+\paragraph{Stage 1. One-step model.}
+Train on frames from one Euler family and, separately, on the forced series.
+Report one-step vorticity error and one-step \(|S_H^{\mathrm{pred}}-S_H^{\mathrm{true}}|\).
+This only checks that the map is locally accurate.
+
+\paragraph{Stage 2. The actual comparison.}
+Autoregressive rollout over the same horizon as the solver curves from Stage 0.
+Overlay \(S_H(t)\).
+This is the figure the project is for.
+Record which of the three outcomes occurred: condensate ( \(S_H\) tracks the solver, \(\Pi<0\) at low \(k\)), collapse (\(S_H\to 0\)), or thermalization (\(S_H\to\log_2 M\)).
+
+\paragraph{Stage 3. The two predictions that use the papers' structure.}
+Train with and without \(\mathcal{L}_\Pi\).
+Train on one initial-condition family and roll out the other two.
+Repeat the forced run at \(128^2\) and check that the plateau does not scale like \(\log_2 M\).
+
+\paragraph{Stage 4. Write-up.}
+One entropy figure per regime, one flux figure, the table of asymptotic \(S_H\) against \(\log_2 M\), and a statement of which predictions held.
+
+\section{What counts as a result}
+
+The project succeeds if Stage 2 produces a rollout whose \(S_H(t)\) follows the solver into an initial-condition-dependent plateau below \(\log_2 M\), with negative low-\(k\) flux, on at least the Euler shear case.
+It also succeeds, as a negative result the papers make interpretable, if the rollout entropy goes to \(0\) or to \(\log_2 M\): that says the learned step does not carry the inverse cascade, and Stage 3 then tests whether the flux loss repairs it.
+
+The project fails only if the solver itself does not produce a falling \(S_H\) on the Euler runs.
+In that case the grid or the time scheme is wrong, and the network is not the object under test.
+
+\section{Boundaries}
+
+GraphCast and FourCastNet stay out of this plan.
+Their spectra are a later application of a diagnostic that has first been checked on a flow where the 2022 and 2024 papers say what \(S_H(t)\) must do.
+The three-dimensional Euler thermalization in the 2022 appendix is a useful control if time remains: the same network class, trained on 3D Euler, should raise \(S_H\) rather than lower it.
+That control is optional and comes after Stage 2.
+
+\end{document}
